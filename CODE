@@ -1,36 +1,140 @@
-#include <Melody.h>
+#include <RTClib.h>
+#include <Wire.h>
+#include <LiquidCrystal_PCF8574.h>
 
-#define PIN_BUZZER 12
+#define SERIAL_BAUDRATE 115200
+#define PIN_TONE 13
+#define BUTTON_HOUR 10
+#define BUTTON_MINUTE 11
+#define TIMER_EXPIRY 15 *  1000  // 5 minutes in milliseconds
+#define DISPLAY_TIME 10 * 1000  // 30 seconds in milliseconds
 
-Melody melody("c d e f g a c*");
+RTC_PCF8523 rtc;
+LiquidCrystal_PCF8574 lcd(0x27);
+bool timerSet = false;
+unsigned long timerStart = 0;
+unsigned long displayStartTime = 0;
 
 void setup() {
-  melody.setTempo(120);               //May be changed whenever you want
+  Serial.begin(SERIAL_BAUDRATE);
+
+  Wire.begin();
+  rtc.begin();
+
+  lcd.begin(16, 2);
+  lcd.setBacklight(255);
+
+  pinMode(BUTTON_HOUR, INPUT_PULLUP);
+  pinMode(BUTTON_MINUTE, INPUT_PULLUP);
 }
 
 void loop() {
- 
-  melody.restart();
-
-  while(melody.hasNext()){
-    melody.next();
-
-    unsigned int freq = melody.getFrequency(); 
-    unsigned long duration = melody.getDuration();
-    int loudness = melody.getLoudness();
-
-    freq > 0 ? tone(PIN_BUZZER,freq,duration) : noTone();
-
-    // loudness could be use with a mapping, according to your buzzer or sound-producing hardware
-    //For Example :
-    /*
-      { 
-        int realIntensity = map(loudness, -4, 4, 0, 1023);
-        myBuzzer.setIntensity(realIntensity);
-      }
-
-
-    */
-
+  if (!timerSet) {
+    showCurrentTime();
+    handleDisplayTime();
+  } else {
+    handleTimerCountdown();
   }
 }
+
+void showCurrentTime() {
+  DateTime now = rtc.now();
+
+  lcd.setCursor(0, 0);
+  lcd.print("Current Time: ");
+  lcd.setCursor(0, 1);
+  lcd.print(now.year(), DEC);
+  lcd.print('/');
+  if (now.month() < 10) {
+    lcd.print('0');
+  }
+  lcd.print(now.month(), DEC);
+  lcd.print('/');
+  if (now.day() < 10) {
+    lcd.print('0');
+  }
+  lcd.print(now.day(), DEC);
+  lcd.print(' ');
+  if (now.hour() < 10) {
+    lcd.print('0');
+  }
+  lcd.print(now.hour(), DEC);
+  lcd.print(':');
+  if (now.minute() < 10) {
+    lcd.print('0');
+  }
+  lcd.print(now.minute(), DEC);
+  lcd.print(':');
+  if (now.second() < 10) {
+    lcd.print('0');
+  }
+  lcd.print(now.second(), DEC);
+}
+
+void handleDisplayTime() {
+  unsigned long currentTime = millis();
+  if (currentTime - displayStartTime >= DISPLAY_TIME) {
+    timerSet = true;
+    lcd.clear();
+  }
+}
+
+void handleTimerCountdown() {
+  if (millis() - timerStart >= TIMER_EXPIRY) {
+    playMelody();
+    timerSet = false;
+    lcd.clear();
+  } else {
+    lcd.setCursor(0, 0);
+    lcd.print("Countdown: ");
+    lcd.setCursor(0, 1);
+    unsigned long remainingTime = (TIMER_EXPIRY - (millis() - timerStart)) / 1000; // convert to seconds
+    unsigned int minutes = remainingTime / 60;
+    unsigned int seconds = remainingTime % 60;
+    if (minutes < 10) {
+      lcd.print("0");
+    }
+    lcd.print(minutes);
+    lcd.print(":");
+    if (seconds < 10) {
+      lcd.print("0");
+    }
+    lcd.print(seconds);
+  }
+}
+
+void playMelody() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Timer Expired!");
+
+  tone(PIN_TONE, 440);  // Play a frequency of 440Hz (A4) for the melody duration
+  delay(1000);          // Change this delay to match the desired melody duration
+  noTone(PIN_TONE);
+  delay(1000);
+}
+
+void setLoudness(int loudness){
+    //Loudness could be use with a mapping function, according to your buzzer or sound-producing hardware
+   #ifdef ESP_PLATFORM
+      #define MIN_HARDWARE_LOUDNESS 0
+      #define MAX_HARDWARE_LOUDNESS 16
+      ledcWrite(CHANNEL, map(loudness, -4, 4, MIN_HARDWARE_LOUDNESS, MAX_HARDWARE_LOUDNESS));
+   #endif
+
+}
+
+
+#ifdef ESP_PLATFORM
+
+void tone(int pin, int frequency) //FOR ESP Platform, pin is unused
+{
+  ledcWriteTone(CHANNEL, frequency);
+}
+
+void noTone(int pin) //FOR ESP Platform, pin is unused
+{
+  ledcWrite(CHANNEL, 0);
+}
+
+#endif
